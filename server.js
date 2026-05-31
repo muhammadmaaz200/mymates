@@ -1,10 +1,9 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { spawn, execFile, exec } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 
 const app = express();
 const server = http.createServer(app);
@@ -13,13 +12,13 @@ const io = new Server(server, { cors: { origin: "*" } });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Agar '/' par masla ho toh explicit route
+// Fallback Route
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ⚡ DIRECT SYSTEM DOWNLOADS FOLDER
-const DOWNLOAD_FOLDER = path.join(os.homedir(), 'Downloads', 'VidFetcher');
+// ⚡ NAYA TEMPORARY FOLDER (Project ke andar)
+const DOWNLOAD_FOLDER = path.join(__dirname, 'temp_downloads');
 if (!fs.existsSync(DOWNLOAD_FOLDER)) {
     fs.mkdirSync(DOWNLOAD_FOLDER, { recursive: true });
 }
@@ -32,11 +31,9 @@ app.post('/search', (req, res) => {
     if (!query) return res.status(400).json({ error: 'Query required' });
 
     const searchQuery = query.includes('http') ? query : `ytsearch10:${query}`;
-    
-    // Yahan hum Node ko bata rahe hain ke direct yt-dlp ki jagah "python -m yt_dlp" chalaye
     const args = ['-m', 'yt_dlp', ...baseArgs, '-J', '--flat-playlist', searchQuery];
 
-    execFile('python', args, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout, stderr) => {
+    execFile('python', args, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout) => {
         if (error) {
             console.error("❌ Search Error:", error.message);
             return res.status(500).json({ error: error.message });
@@ -53,7 +50,6 @@ app.post('/search', (req, res) => {
             })).filter(e => e.title);
             res.json({ results });
         } catch (e) {
-            console.error("❌ Parse Error:", e.message);
             res.status(500).json({ error: 'Failed to parse data' });
         }
     });
@@ -67,14 +63,10 @@ app.post('/get-formats', (req, res) => {
     const args = ['-m', 'yt_dlp', ...baseArgs, '-J', url];
 
     execFile('python', args, { maxBuffer: 1024 * 1024 * 10 }, (error, stdout) => {
-        if (error) {
-            console.error("❌ Format Error:", error.message);
-            return res.status(500).json({ error: error.message });
-        }
+        if (error) return res.status(500).json({ error: error.message });
         try {
             const info = JSON.parse(stdout);
             const formats = info.formats || [];
-            
             let musicOptions = [];
             let videoOptions = [];
             let seenVideoRes = new Set();
@@ -87,13 +79,7 @@ app.post('/get-formats', (req, res) => {
                     seenAudioAbr.add(abr);
                     const size = f.filesize || f.filesize_approx || 0;
                     if (size > 0) {
-                        musicOptions.push({
-                            id: f.format_id,
-                            quality: `${Math.round(abr)}K`,
-                            format: 'MP3',
-                            size: `${(size / (1024 * 1024)).toFixed(1)}MB`,
-                            is_audio: true
-                        });
+                        musicOptions.push({ id: f.format_id, quality: `${Math.round(abr)}K`, format: 'MP3', size: `${(size / (1024 * 1024)).toFixed(1)}MB`, is_audio: true });
                     }
                 } else if (f.vcodec !== 'none') {
                     const height = f.height;
@@ -103,33 +89,21 @@ app.post('/get-formats', (req, res) => {
                     if (seenVideoRes.has(resLabel)) return;
                     seenVideoRes.add(resLabel);
                     const size = f.filesize || f.filesize_approx || 0;
-                    videoOptions.push({
-                        id: f.format_id,
-                        quality: resLabel,
-                        format: 'Auto',
-                        size: size > 0 ? `${(size / (1024 * 1024)).toFixed(1)}MB` : "Auto",
-                        is_audio: false
-                    });
+                    videoOptions.push({ id: f.format_id, quality: resLabel, format: 'Auto', size: size > 0 ? `${(size / (1024 * 1024)).toFixed(1)}MB` : "Auto", is_audio: false });
                 }
             });
 
             musicOptions.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
             videoOptions.sort((a, b) => parseInt(b.quality) - parseInt(a.quality));
 
-            res.json({
-                title: info.title || 'Video',
-                thumbnail: info.thumbnail,
-                platform: (info.extractor_key || 'Web').toLowerCase(),
-                music: musicOptions,
-                video: videoOptions
-            });
+            res.json({ title: info.title || 'Video', thumbnail: info.thumbnail, platform: (info.extractor_key || 'Web').toLowerCase(), music: musicOptions, video: videoOptions });
         } catch (e) {
             res.status(500).json({ error: 'Failed to process formats' });
         }
     });
 });
 
-// 3. Download Progress
+// 3. Download Progress & Process
 io.on('connection', (socket) => {
     socket.on('disconnect', () => {});
 });
@@ -140,7 +114,11 @@ app.post('/process-download', (req, res) => {
     
     setTimeout(() => {
         let formatStr = is_audio ? format_id : (format_id === 'best' ? 'best' : `${format_id}+bestaudio/best`);
-        let args = ['-m', 'yt_dlp', ...baseArgs, '--newline', '-f', formatStr, '-o', path.join(DOWNLOAD_FOLDER, `${taskId}.%(ext)s`)];
+        
+        // File ka naam task ID aur original YouTube title ke sath set hoga
+        let outputTemplate = path.join(DOWNLOAD_FOLDER, `${taskId}_%(title)s.%(ext)s`);
+        
+        let args = ['-m', 'yt_dlp', ...baseArgs, '--newline', '-f', formatStr, '-o', outputTemplate];
         
         if (is_audio) {
             args.push('--extract-audio', '--audio-format', 'mp3');
@@ -155,21 +133,27 @@ app.post('/process-download', (req, res) => {
                 const percent = parseFloat(percentMatch[1]);
                 io.to(socket_id).emit('progress', { percent: percent, status: 'Downloading...' });
             } else if (output.includes('Merging formats') || output.includes('Extracting audio')) {
-                io.to(socket_id).emit('progress', { percent: 100, status: 'Instant Merging...' });
+                io.to(socket_id).emit('progress', { percent: 100, status: 'Processing...' });
             }
         });
 
         ytdlp.on('close', () => {
+            // Folder check kar ke asal file ka poora naam frontend ko bhejna
             fs.readdir(DOWNLOAD_FOLDER, (err, files) => {
+                if (err) return;
                 const downloadedFile = files.find(f => f.startsWith(taskId));
-                let actualExt = '.mp4';
-                if (downloadedFile) actualExt = path.extname(downloadedFile);
-                io.to(socket_id).emit('download_complete', { task_id: taskId, ext: actualExt, title: 'Downloaded Successfully' });
+                if (downloadedFile) {
+                    io.to(socket_id).emit('download_complete', { 
+                        task_id: taskId, 
+                        filename: downloadedFile,
+                        title: 'Ready for Download' 
+                    });
+                }
             });
         });
 
         ytdlp.stderr.on('data', (data) => {
-             console.error("❌ Download Warning/Error:", data.toString());
+            console.error("❌ Warning:", data.toString());
         });
 
     }, 0);
@@ -177,7 +161,22 @@ app.post('/process-download', (req, res) => {
     res.json({ status: "started" });
 });
 
-// 4. API Files List
+// ⚡ 4. NAYA ROUTE: Browser ko file bhejne ke liye (Save As / IDM dialog)
+app.get('/download-file/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const filePath = path.join(DOWNLOAD_FOLDER, filename);
+    
+    if (fs.existsSync(filePath)) {
+        // Yeh line browser ko force karti hai file user ki device par save karwane ke liye
+        // Saath hi original title ke shuru se Task ID nikal dete hain taake naam saaf aye
+        const cleanName = filename.replace(/^\d+_/, '');
+        res.download(filePath, cleanName); 
+    } else {
+        res.status(404).json({ error: "File not found" });
+    }
+});
+
+// 5. API Files List
 app.get('/api/files', (req, res) => {
     let filesList = [];
     if (fs.existsSync(DOWNLOAD_FOLDER)) {
@@ -188,13 +187,11 @@ app.get('/api/files', (req, res) => {
             if (stats.isFile()) {
                 const sizeMb = stats.size / (1024 * 1024);
                 const ext = path.extname(f).replace('.', '').toUpperCase();
-                const isAudio = ['MP3', 'M4A', 'OPUS'].includes(ext);
                 filesList.push({
-                    name: f,
+                    name: f.replace(/^\d+_/, ''),
                     size: `${sizeMb.toFixed(1)} MB`,
                     type: ext,
                     date: stats.mtime.toISOString().split('T')[0],
-                    is_audio: isAudio,
                     mod_time: stats.mtime.getTime()
                 });
             }
@@ -202,26 +199,6 @@ app.get('/api/files', (req, res) => {
     }
     filesList.sort((a, b) => b.mod_time - a.mod_time);
     res.json({ files: filesList });
-});
-
-// 5. System Player Launcher
-app.get('/play-system/:filename', (req, res) => {
-    const filename = req.params.filename;
-    const filePath = path.join(DOWNLOAD_FOLDER, filename);
-    
-    if (fs.existsSync(filePath)) {
-        let command;
-        if (process.platform === 'win32') command = `start "" "${filePath}"`;
-        else if (process.platform === 'darwin') command = `open "${filePath}"`;
-        else command = `xdg-open "${filePath}"`;
-
-        exec(command, (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ status: "success" });
-        });
-    } else {
-        res.status(404).json({ error: "File not found" });
-    }
 });
 
 const PORT = process.env.PORT || 5000;
