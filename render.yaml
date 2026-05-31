@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: vidfetcher-pro-node
+    env: python
+    buildCommand: pip install yt-dlp && npm install
+    startCommand: npm start
+    plan: free

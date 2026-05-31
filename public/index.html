@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VidFetcher Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.js"></script>
+    <style>
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .vid-red { color: #E50914; }
+        .bg-vid-red { background-color: #E50914; }
+        .nav-active { color: #E50914; font-weight: bold; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex justify-center font-sans select-none overflow-hidden">
+
+    <div class="w-full max-w-md bg-white h-screen flex flex-col relative shadow-2xl">
+        
+        <header class="bg-white pt-4 pb-2 px-4 flex gap-3 items-center z-10 sticky top-0 shadow-sm">
+            <div class="flex-1 bg-gray-100 rounded-full flex items-center px-4 py-2 border border-gray-200">
+                <i class="fa-solid fa-search text-gray-500 mr-2"></i>
+                <input type="text" id="search-input" placeholder="Search or paste link" class="bg-transparent outline-none w-full text-sm text-gray-800" onkeypress="if(event.key === 'Enter') searchVideos()">
+            </div>
+            <div class="w-8 h-8 flex items-center justify-center text-gray-600">
+                <i class="fa-solid fa-download text-xl"></i>
+            </div>
+        </header>
+
+        <div class="flex-1 overflow-y-auto no-scrollbar pb-20 bg-gray-50 relative">
+            
+            <div id="tab-home" class="block">
+                <div class="flex justify-between px-6 py-4 bg-white mb-2 shadow-sm">
+                    <div class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 rounded-full bg-red-600 text-white flex items-center justify-center text-2xl shadow-md"><i class="fa-brands fa-youtube"></i></div>
+                        <span class="text-[10px] text-gray-600 font-medium mt-1">Youtube</span>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 rounded-full bg-green-500 text-white flex items-center justify-center text-2xl shadow-md"><i class="fa-brands fa-whatsapp"></i></div>
+                        <span class="text-[10px] text-gray-600 font-medium mt-1">WhatsApp</span>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-2xl shadow-md"><i class="fa-brands fa-facebook-f"></i></div>
+                        <span class="text-[10px] text-gray-600 font-medium mt-1">Facebook</span>
+                    </div>
+                    <div class="flex flex-col items-center gap-1">
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 text-white flex items-center justify-center text-2xl shadow-md"><i class="fa-brands fa-instagram"></i></div>
+                        <span class="text-[10px] text-gray-600 font-medium mt-1">Instagram</span>
+                    </div>
+                </div>
+
+                <div id="results-view" class="flex flex-col gap-2">
+                    <div class="text-center text-gray-400 mt-20">
+                        <i class="fa-brands fa-youtube text-5xl mb-3 opacity-20"></i>
+                        <p class="text-sm">Search any video to start downloading</p>
+                    </div>
+                </div>
+                
+                <div id="search-loading" class="hidden text-center py-10">
+                    <i class="fa-solid fa-spinner fa-spin text-3xl vid-red"></i>
+                </div>
+            </div>
+
+            <div id="tab-files" class="hidden bg-white min-h-full">
+                <div class="flex border-b border-gray-200">
+                    <div class="flex-1 text-center py-3 border-b-2 border-red-500 text-red-500 font-bold text-sm">Downloads</div>
+                </div>
+                <div class="p-3 flex justify-between items-center text-xs text-gray-500 font-medium bg-gray-50">
+                    <span id="file-count">Downloaded (0)</span>
+                    <span>All Files <i class="fa-solid fa-angle-down"></i></span>
+                </div>
+                <div id="file-list" class="flex flex-col px-3 pb-4"></div>
+            </div>
+
+        </div>
+
+        <div class="absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-evenly pt-2 pb-4 text-[10px] text-gray-500 font-medium z-20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+            <div onclick="switchTab('home')" id="nav-home" class="flex flex-col items-center gap-1 nav-active cursor-pointer w-20 transition-colors">
+                <i class="fa-solid fa-house text-xl mb-0.5"></i>HOME
+            </div>
+            <div onclick="switchTab('files')" id="nav-files" class="flex flex-col items-center gap-1 cursor-pointer w-20 transition-colors">
+                <i class="fa-solid fa-folder-open text-xl mb-0.5"></i>MY FILES
+            </div>
+        </div>
+
+        <div id="download-modal" class="absolute inset-0 bg-black/70 z-40 hidden flex-col justify-end">
+            <div class="flex-1" onclick="closeModal()"></div>
+            <div class="bg-white w-full rounded-t-[1.5rem] animate-slide-up flex flex-col max-h-[85vh]">
+                <div id="loading-state" class="p-10 text-center hidden">
+                    <i class="fa-solid fa-circle-notch fa-spin text-3xl vid-red mb-3"></i>
+                    <p class="text-gray-600 font-medium mt-2">Fetching formats...</p>
+                </div>
+                <div id="modal-content" class="hidden flex-col overflow-hidden">
+                    <div class="p-4 flex gap-4 items-center border-b border-gray-100 shadow-sm relative z-10 bg-white rounded-t-[1.5rem]">
+                        <img id="video-thumb" src="" class="w-24 h-16 object-cover rounded-lg">
+                        <div class="flex-1">
+                            <h2 id="video-title" class="font-bold text-gray-900 text-sm line-clamp-2"></h2>
+                            <p id="platform-badge" class="text-xs text-gray-500 mt-1 uppercase font-bold tracking-wide"></p>
+                        </div>
+                    </div>
+                    <div id="options-area" class="p-5 overflow-y-auto no-scrollbar pb-24">
+                        <h3 class="text-lg font-bold flex items-center gap-2 mb-4"><i class="fa-solid fa-music vid-red"></i> Music</h3>
+                        <div id="music-grid" class="grid grid-cols-2 gap-y-4 gap-x-2 mb-6"></div>
+                        <h3 class="text-lg font-bold flex items-center gap-2 mb-4"><i class="fa-solid fa-video vid-red"></i> Video</h3>
+                        <div id="video-grid" class="grid grid-cols-2 gap-y-4 gap-x-2"></div>
+                    </div>
+                    <div id="progress-area" class="p-8 hidden flex-col items-center pb-24">
+                        <div class="w-24 h-24 rounded-full border-4 border-gray-100 flex items-center justify-center relative mb-4">
+                            <svg class="absolute inset-0 w-full h-full transform -rotate-90">
+                                <circle cx="48" cy="48" r="44" stroke="currentColor" stroke-width="4" fill="none" class="text-gray-200"></circle>
+                                <circle id="progress-circle" cx="48" cy="48" r="44" stroke="currentColor" stroke-width="4" fill="none" class="vid-red transition-all duration-300" stroke-dasharray="276" stroke-dashoffset="276"></circle>
+                            </svg>
+                            <span id="progress-text" class="text-xl font-bold text-gray-800">0%</span>
+                        </div>
+                        <p id="progress-status" class="text-gray-600 font-medium">Downloading...</p>
+                    </div>
+                    <div class="absolute bottom-0 w-full p-4 bg-white border-t border-gray-100 shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+                        <button onclick="triggerDownload()" id="dl-btn" class="w-full bg-vid-red text-white py-3.5 rounded-full font-bold text-lg shadow-md flex justify-center items-center gap-2 active:scale-95 transition-transform">
+                            <i class="fa-solid fa-circle-down"></i> DOWNLOAD
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const socket = io();
+        let currentSocketId = null;
+        let selectedFormat = null;
+        let selectedIsAudio = false;
+        let currentVideoUrl = null;
+
+        socket.on('connect', () => { currentSocketId = socket.id; });
+        
+        socket.on('progress', (data) => {
+            document.getElementById('progress-text').innerText = `${data.percent}%`;
+            document.getElementById('progress-status').innerText = data.status;
+            document.getElementById('progress-circle').style.strokeDashoffset = 276 - (data.percent / 100) * 276;
+        });
+        
+        socket.on('download_complete', (data) => {
+            document.getElementById('progress-status').innerText = "Download Complete!";
+            document.getElementById('progress-text').innerText = "100%";
+            document.getElementById('dl-btn').innerHTML = `<i class="fa-solid fa-check"></i> DONE`;
+            
+            // KOI REDIRECT NAHI HOGA IDM BYPASS KE LIYE
+            setTimeout(() => { 
+                closeModal(); 
+                fetchFiles(); 
+            }, 2000);
+        });
+
+        function switchTab(tab) {
+            document.getElementById('tab-home').classList.add('hidden');
+            document.getElementById('tab-files').classList.add('hidden');
+            document.getElementById('nav-home').classList.remove('nav-active');
+            document.getElementById('nav-files').classList.remove('nav-active');
+
+            if(tab === 'home') {
+                document.getElementById('tab-home').classList.remove('hidden');
+                document.getElementById('nav-home').classList.add('nav-active');
+            } else if (tab === 'files') {
+                document.getElementById('tab-files').classList.remove('hidden');
+                document.getElementById('nav-files').classList.add('nav-active');
+                fetchFiles(); 
+            }
+        }
+
+        async function fetchFiles() {
+            try {
+                const res = await fetch('/api/files');
+                const data = await res.json();
+                const list = document.getElementById('file-list');
+                document.getElementById('file-count').innerText = `Downloaded (${data.files.length})`;
+                
+                list.innerHTML = data.files.map(file => `
+                    <div class="flex gap-3 py-3 border-b border-gray-100 items-center cursor-pointer active:bg-gray-100" onclick="window.open('/download/${encodeURIComponent(file.name)}','_blank')"
+                        <div class="w-16 h-12 rounded bg-gray-800 flex items-center justify-center text-white text-xl flex-shrink-0 relative overflow-hidden shadow-inner">
+                            ${file.is_audio ? '<div class="absolute inset-0 bg-gradient-to-tr from-pink-500 to-red-500"></div><i class="fa-solid fa-music relative z-10 text-white"></i>' : '<i class="fa-solid fa-play"></i>'}
+                        </div>
+                        <div class="flex flex-col flex-1 overflow-hidden">
+                            <h4 class="text-sm font-medium text-gray-800 truncate">${file.name}</h4>
+                            <div class="flex items-center gap-2 text-[11px] text-gray-400 mt-1">
+                                <span><i class="fa-brands fa-youtube mr-1 text-gray-300"></i>${file.size}</span>
+                                <span>|</span>
+                                <span>${file.type}</span>
+                                <span>|</span>
+                                <span>${file.date}</span>
+                            </div>
+                        </div>
+                        <div class="text-gray-400 px-2"><i class="fa-solid fa-play-circle text-lg text-red-500"></i></div>
+                    </div>
+                `).join('');
+                
+                if(data.files.length === 0) {
+                    list.innerHTML = `<div class="text-center py-10 text-gray-400 text-sm">No files downloaded yet</div>`;
+                }
+            } catch (err) {}
+        }
+
+        // ⚡ NAYA FUNCTION: Jo PC/Mobile ka apna player kholay ga
+     
+
+        async function searchVideos() {
+            const query = document.getElementById('search-input').value;
+            if(!query) return;
+            
+            document.getElementById('results-view').classList.add('hidden');
+            document.getElementById('search-loading').classList.remove('hidden');
+
+            const response = await fetch('/search', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({query: query})
+            });
+            const data = await response.json();
+            
+            document.getElementById('search-loading').classList.add('hidden');
+            const resultsView = document.getElementById('results-view');
+            resultsView.innerHTML = '';
+
+            data.results.forEach(video => {
+                resultsView.innerHTML += `
+                    <div class="bg-white p-3 flex gap-3 cursor-pointer border-b border-gray-100" onclick="openDownloadOptions('${video.url}')">
+                        <div class="relative w-36 h-24 flex-shrink-0">
+                            <img src="${video.thumbnail}" class="w-full h-full object-cover rounded-md">
+                            <span class="absolute bottom-1 right-1 bg-black/80 text-white text-[10px] px-1.5 py-0.5 rounded">${video.duration}</span>
+                        </div>
+                        <div class="flex-col flex-1 py-1 pr-6 relative">
+                            <h3 class="text-[13px] font-bold text-gray-800 line-clamp-3 leading-tight mb-1">${video.title}</h3>
+                            <span class="text-[11px] text-gray-500 block mt-1">${video.uploader}</span>
+                            <div class="absolute right-0 bottom-2 w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 border border-gray-200">
+                                <i class="fa-solid fa-download text-xs"></i>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            resultsView.classList.remove('hidden');
+        }
+
+        function closeModal() { document.getElementById('download-modal').classList.add('hidden'); }
+
+        async function openDownloadOptions(url) {
+            currentVideoUrl = url;
+            
+            document.getElementById('options-area').classList.remove('hidden');
+            document.getElementById('progress-area').classList.add('hidden');
+            document.getElementById('dl-btn').disabled = false;
+            document.getElementById('dl-btn').innerHTML = `<i class="fa-solid fa-circle-down"></i> DOWNLOAD`;
+            
+            document.getElementById('download-modal').classList.remove('hidden');
+            document.getElementById('download-modal').classList.add('flex');
+            document.getElementById('modal-content').classList.add('hidden');
+            document.getElementById('loading-state').classList.remove('hidden');
+
+            try {
+                const response = await fetch('/get-formats', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: url })
+                });
+                const data = await response.json();
+                
+                document.getElementById('video-title').innerText = data.title;
+                document.getElementById('video-thumb').src = data.thumbnail;
+                document.getElementById('platform-badge').innerText = "YouTube";
+
+                renderGrid('music-grid', data.music);
+                renderGrid('video-grid', data.video);
+
+                setTimeout(() => {
+                    const firstInput = document.querySelector('input[name="format_selection"]');
+                    if (firstInput) { firstInput.checked = true; setSelection(firstInput.value, firstInput.dataset.isaudio === 'true'); }
+                }, 50);
+
+                document.getElementById('loading-state').classList.add('hidden');
+                document.getElementById('modal-content').classList.remove('hidden');
+                document.getElementById('modal-content').classList.add('flex');
+
+            } catch (error) { alert("Error fetching formats"); closeModal(); }
+        }
+
+        function renderGrid(containerId, options) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = options.length === 0 ? '<span class="text-xs text-gray-400">Not Available</span>' : 
+                options.map((opt, index) => `
+                    <label class="flex items-start gap-3 cursor-pointer group p-2 rounded hover:bg-gray-50 border border-transparent peer-checked:border-red-100">
+                        <input type="radio" name="format_selection" value="${opt.id}" data-isaudio="${opt.is_audio}" class="peer hidden" onchange="setSelection('${opt.id}', ${opt.is_audio})">
+                        <div class="w-5 h-5 rounded-full border-2 border-gray-300 peer-checked:border-vid-red peer-checked:border-[6px] transition-all mt-0.5"></div>
+                        <div class="flex flex-col">
+                            <span class="text-gray-800 font-bold peer-checked:text-vid-red text-sm">${opt.quality} <span class="text-xs text-gray-500 font-normal">(${opt.format})</span></span>
+                            <span class="text-xs text-gray-400">${opt.size}</span>
+                        </div>
+                    </label>
+                `).join('');
+        }
+
+        function setSelection(formatId, isAudio) { selectedFormat = formatId; selectedIsAudio = isAudio; }
+
+        async function triggerDownload() {
+            if (!currentVideoUrl || !selectedFormat) return alert("Please select a format!");
+            
+            document.getElementById('options-area').classList.add('hidden');
+            document.getElementById('progress-area').classList.remove('hidden');
+            document.getElementById('progress-area').classList.add('flex');
+            
+            const btn = document.getElementById('dl-btn');
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing...`;
+            btn.disabled = true;
+
+            await fetch('/process-download', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: currentVideoUrl, format_id: selectedFormat, is_audio: selectedIsAudio, socket_id: currentSocketId })
+            });
+        }
+    </script>
+</body>
+</html>
