@@ -145,15 +145,18 @@
         });
         
         socket.on('download_complete', (data) => {
-            document.getElementById('progress-status').innerText = "Download Complete!";
+            document.getElementById('progress-status').innerText = "File Ready! Saving to device...";
             document.getElementById('progress-text').innerText = "100%";
             document.getElementById('dl-btn').innerHTML = `<i class="fa-solid fa-check"></i> DONE`;
             
-            // KOI REDIRECT NAHI HOGA IDM BYPASS KE LIYE
+            // ⚡ YEH LINE BROWSER KA "SAVE AS" YA IDM KHOLAY GI
+            window.location.href = '/download-file/' + encodeURIComponent(data.filename);
+            
+            // 3 seconds ke baad popup khud close ho jayega
             setTimeout(() => { 
                 closeModal(); 
                 fetchFiles(); 
-            }, 2000);
+            }, 3000); 
         });
 
         function switchTab(tab) {
